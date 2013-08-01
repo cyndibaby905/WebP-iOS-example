@@ -55,30 +55,45 @@ static void free_image_data(void *info, const void *data, size_t size)
 - (void)displayImage:(NSString *)filePath
 {
     // Find the path of the selected WebP image in the bundle and read it into memory
-    NSData *myData = [NSData dataWithContentsOfFile:filePath];
+    NSData *data = [NSData dataWithContentsOfFile:filePath];
     
     // Get the current version of the WebP decoder
-    int rc = WebPGetDecoderVersion();
+    WebPDecoderConfig config;
+    if (!WebPInitDecoderConfig(&config)) {
+        return;
+    }
     
-    NSLog(@"Version: %d", rc);
+    config.output.colorspace = MODE_rgbA;
+    config.options.use_threads = 1;
     
-    // Get the width and height of the selected WebP image
-    int width = 0;
-    int height = 0;
-    WebPGetInfo([myData bytes], [myData length], &width, &height);
+    if (WebPDecode([data bytes], [data length], &config) != VP8_STATUS_OK) {
+        return;
+    }
     
-    NSLog(@"Image Width: %d Image Height: %d", width, height);
+    int width = (&config)->input.width;
+    int height = (&config)->input.height;
+    if ((&config)->options.use_scaling) {
+        width = (&config)->options.scaled_width;
+        height = (&config)->options.scaled_height;
+    }
     
-    // Decode the WebP image data into a RGBA value array
-    uint8_t *data = WebPDecodeRGBA([myData bytes], [myData length], &width, &height);
-    
-    // Construct a UIImage from the decoded RGBA value array
-    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, data, width*height*4, free_image_data);
+    // Construct a UIImage from the decoded RGBA value array.
+    CGDataProviderRef provider =
+    CGDataProviderCreateWithData(NULL, (&config)->output.u.RGBA.rgba,
+                                 (&config)->output.u.RGBA.size, free_image_data);
     CGColorSpaceRef colorSpaceRef = CGColorSpaceCreateDeviceRGB();
-    CGBitmapInfo bitmapInfo = kCGBitmapByteOrderDefault;
+    CGBitmapInfo bitmapInfo = kCGBitmapByteOrder32Big | kCGImageAlphaPremultipliedLast;
     CGColorRenderingIntent renderingIntent = kCGRenderingIntentDefault;
-    CGImageRef imageRef = CGImageCreate(width, height, 8, 32, 4*width, colorSpaceRef, bitmapInfo, provider, NULL, NO, renderingIntent);
-    UIImage *newImage = [[UIImage imageWithCGImage:imageRef] retain];
+    CGImageRef imageRef =
+    CGImageCreate(width, height, 8, 32, 4 * width, colorSpaceRef, bitmapInfo,
+                  provider, NULL, NO, renderingIntent);
+    
+    CGColorSpaceRelease(colorSpaceRef);
+    CGDataProviderRelease(provider);
+    
+    UIImage* newImage = [[UIImage alloc] initWithCGImage:imageRef];
+    CGImageRelease(imageRef);
+    
     
     // Set the image into the image view and make image view and the scroll view to the correct size
     self.testImageView.frame = CGRectMake(0, 0, width, height);
@@ -86,9 +101,7 @@ static void free_image_data(void *info, const void *data, size_t size)
     
     self.imageScrollView.contentSize = CGSizeMake(width, height);
     
-    CGImageRelease(imageRef);
-    CGColorSpaceRelease(colorSpaceRef);
-    CGDataProviderRelease(provider);
+  
     
     [newImage release];
 }
